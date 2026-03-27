@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
 const monthNames = [
   "January", "February", "March", "April", "May", "June",
@@ -25,13 +25,12 @@ const jobTypeOptions = [
 ];
 
 const defaultChecklist = {
-  droneShot: false,
-  phoneShot: false,
-  talkingClip: false,
-  detailShots: false,
-  beforeAfterAngle: false,
+  hookShot: false,
+  angleShots: false,
+  shotsCaptured: false,
+  productionGoal: false,
   scriptUsed: false,
-  captionReady: false,
+  captionUsed: false,
   edited: false,
   posted: false,
 };
@@ -452,40 +451,40 @@ function getPlanForDate(date, selectedService, selectedJobType) {
   return filteredBank[index];
 }
 
-function SlideDots({ count, index, setIndex }) {
-  return (
-    <div style={styles.dotsWrap}>
-      {Array.from({ length: count }).map((_, i) => (
-        <button
-          key={i}
-          onClick={() => setIndex(i)}
-          style={{
-            ...styles.dotBtn,
-            ...(i === index ? styles.dotBtnActive : {}),
-          }}
-          aria-label={`Go to slide ${i + 1}`}
-        />
-      ))}
-    </div>
-  );
-}
+function SwipeDeck({ slides, index, setIndex }) {
+  const startX = useRef(null);
 
-function SlideNav({ index, setIndex, count }) {
+  function onTouchStart(e) {
+    startX.current = e.touches[0].clientX;
+  }
+
+  function onTouchEnd(e) {
+    if (startX.current === null) return;
+    const diff = e.changedTouches[0].clientX - startX.current;
+    if (Math.abs(diff) > 50) {
+      if (diff < 0) setIndex((prev) => (prev === slides.length - 1 ? 0 : prev + 1));
+      if (diff > 0) setIndex((prev) => (prev === 0 ? slides.length - 1 : prev - 1));
+    }
+    startX.current = null;
+  }
+
   return (
-    <div style={styles.slideNav}>
-      <button
-        style={styles.slideArrow}
-        onClick={() => setIndex((prev) => (prev === 0 ? count - 1 : prev - 1))}
-      >
-        ←
-      </button>
-      <button
-        style={styles.slideArrow}
-        onClick={() => setIndex((prev) => (prev === count - 1 ? 0 : prev + 1))}
-      >
-        →
-      </button>
-    </div>
+    <>
+      <div style={styles.dotsWrap}>
+        {slides.map((slide, i) => (
+          <button
+            key={slide.name}
+            onClick={() => setIndex(i)}
+            style={{ ...styles.dotBtn, ...(i === index ? styles.dotBtnActive : {}) }}
+            aria-label={`Go to ${slide.name}`}
+          />
+        ))}
+      </div>
+      <div style={styles.swipeHint}>Swipe left or right</div>
+      <div style={styles.slideViewport} onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
+        {slides[index].content}
+      </div>
+    </>
   );
 }
 
@@ -500,35 +499,60 @@ export default function App() {
   const [todaySlide, setTodaySlide] = useState(0);
   const [librarySlide, setLibrarySlide] = useState(0);
   const [entries, setEntries] = useState(() => {
-    const saved = localStorage.getItem("sns-30-day-planner-ui-v3");
+    const saved = localStorage.getItem("sns-30-day-planner-ui-v4");
     return saved ? JSON.parse(saved) : {};
   });
 
   useEffect(() => {
-    localStorage.setItem("sns-30-day-planner-ui-v3", JSON.stringify(entries));
+    localStorage.setItem("sns-30-day-planner-ui-v4", JSON.stringify(entries));
   }, [entries]);
 
   useEffect(() => {
     setTodaySlide(0);
   }, [selectedDate, selectedService, selectedJobType]);
 
-  const days = useMemo(
-    () => getDaysInMonth(currentYear, currentMonth),
-    [currentYear, currentMonth]
-  );
-
-  const filteredBank = useMemo(
-    () => getFilteredBank(selectedService, selectedJobType),
-    [selectedService, selectedJobType]
-  );
-
+  const days = useMemo(() => getDaysInMonth(currentYear, currentMonth), [currentYear, currentMonth]);
+  const filteredBank = useMemo(() => getFilteredBank(selectedService, selectedJobType), [selectedService, selectedJobType]);
   const dateKey = formatDateKey(selectedDate);
   const entry = getEntry(entries, dateKey);
   const plan = getPlanForDate(selectedDate, selectedService, selectedJobType);
+
+  const autoChecklist = {
+    hookShot: plan.hook.trim().length > 0,
+    angleShots: plan.angles.length > 0,
+    shotsCaptured: plan.shots.length > 0,
+    productionGoal: true,
+    scriptUsed: entry.customScript.trim().length > 0,
+    captionUsed: entry.customCaption.trim().length > 0,
+    edited: entry.checklist.edited,
+    posted: entry.checklist.posted,
+  };
+
+  useEffect(() => {
+    setEntries((prev) => ({
+      ...prev,
+      [dateKey]: {
+        ...getEntry(prev, dateKey),
+        checklist: {
+          ...getEntry(prev, dateKey).checklist,
+          hookShot: autoChecklist.hookShot,
+          angleShots: autoChecklist.angleShots,
+          shotsCaptured: autoChecklist.shotsCaptured,
+          productionGoal: autoChecklist.productionGoal,
+          scriptUsed: autoChecklist.scriptUsed,
+          captionUsed: autoChecklist.captionUsed,
+        },
+      },
+    }));
+  }, [dateKey, plan.hook, plan.angles, plan.shots, entry.customScript, entry.customCaption]);
+
+  const liveChecklist = {
+    ...entry.checklist,
+    ...autoChecklist,
+  };
+
   const completion = Math.round(
-    (Object.values(entry.checklist).filter(Boolean).length /
-      Object.values(entry.checklist).length) *
-      100
+    (Object.values(liveChecklist).filter(Boolean).length / Object.values(liveChecklist).length) * 100
   );
 
   function updateEntry(patch) {
@@ -542,6 +566,7 @@ export default function App() {
   }
 
   function toggleChecklist(key) {
+    if (["hookShot", "angleShots", "shotsCaptured", "productionGoal", "scriptUsed", "captionUsed"].includes(key)) return;
     updateEntry({
       checklist: {
         ...entry.checklist,
@@ -595,7 +620,7 @@ export default function App() {
       ),
     },
     {
-      name: "Shot List",
+      name: "Shots",
       content: (
         <div style={styles.slideStack}>
           <div style={styles.cardSoft}>
@@ -667,7 +692,7 @@ export default function App() {
 
   const librarySlides = [
     {
-      name: "Services",
+      name: "Filters",
       content: (
         <div style={styles.slideStack}>
           <div style={styles.cardSoft}>
@@ -676,6 +701,24 @@ export default function App() {
               {serviceOptions.map((option) => <option key={option} value={option}>{option}</option>)}
             </select>
           </div>
+          <div style={styles.cardSoft}>
+            <div style={styles.smallEyebrow}>Job Type Mode</div>
+            <select style={styles.select} value={selectedJobType} onChange={(e) => setSelectedJobType(e.target.value)}>
+              {jobTypeOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+            </select>
+          </div>
+          <div style={styles.cardSoft}>
+            <h3 style={styles.cardTitle}>Current Result</h3>
+            <p style={styles.sectionText}>You currently have <strong>{filteredBank.length}</strong> content ideas in this mode.</p>
+            <p style={styles.sectionText}>Today’s plan updates instantly when you change these filters.</p>
+          </div>
+        </div>
+      ),
+    },
+    {
+      name: "Services",
+      content: (
+        <div style={styles.slideStack}>
           <div style={styles.cardSoft}>
             <h3 style={styles.cardTitle}>Built For Your Services</h3>
             <ul style={styles.cleanList}>
@@ -691,26 +734,7 @@ export default function App() {
       ),
     },
     {
-      name: "Job Types",
-      content: (
-        <div style={styles.slideStack}>
-          <div style={styles.cardSoft}>
-            <div style={styles.smallEyebrow}>Job Type Mode</div>
-            <select style={styles.select} value={selectedJobType} onChange={(e) => setSelectedJobType(e.target.value)}>
-              {jobTypeOptions.map((option) => <option key={option} value={option}>{option}</option>)}
-            </select>
-          </div>
-          <div style={styles.cardSoft}>
-            <h3 style={styles.cardTitle}>Current Mode</h3>
-            <p style={styles.sectionText}>You currently have <strong>{filteredBank.length}</strong> content ideas in this mode.</p>
-            <p style={styles.sectionText}>Service: <strong>{selectedService}</strong></p>
-            <p style={styles.sectionText}>Job Type: <strong>{selectedJobType}</strong></p>
-          </div>
-        </div>
-      ),
-    },
-    {
-      name: "Best Practices",
+      name: "Rules",
       content: (
         <div style={styles.slideStack}>
           <div style={styles.cardSoft}>
@@ -738,6 +762,17 @@ export default function App() {
     },
   ];
 
+  const checklistItems = [
+    ["hookShot", "Hook ready", true],
+    ["angleShots", "Angles loaded", true],
+    ["shotsCaptured", "Shots loaded", true],
+    ["productionGoal", "Goal loaded", true],
+    ["scriptUsed", "Script entered", true],
+    ["captionUsed", "Caption entered", true],
+    ["edited", "Edited", false],
+    ["posted", "Posted", false],
+  ];
+
   return (
     <div style={styles.page}>
       <div style={styles.appShell}>
@@ -759,9 +794,7 @@ export default function App() {
                 </div>
                 <div style={styles.miniPill}>{completion}% done</div>
               </div>
-              <SlideNav index={todaySlide} setIndex={setTodaySlide} count={todaySlides.length} />
-              <SlideDots count={todaySlides.length} index={todaySlide} setIndex={setTodaySlide} />
-              <div style={styles.slideViewport}>{todaySlides[todaySlide].content}</div>
+              <SwipeDeck slides={todaySlides} index={todaySlide} setIndex={setTodaySlide} />
             </div>
           )}
 
@@ -777,7 +810,6 @@ export default function App() {
                   <button style={styles.iconBtn} onClick={() => moveMonth("next")}>→</button>
                 </div>
               </div>
-
               <div style={styles.calendarWrap}>
                 <div style={styles.weekRow}>
                   {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => <div key={d} style={styles.weekLabel}>{d}</div>)}
@@ -787,7 +819,16 @@ export default function App() {
                     if (!day) return <div key={idx} style={styles.blankDay} />;
                     const key = formatDateKey(day);
                     const savedEntry = getEntry(entries, key);
-                    const doneCount = Object.values(savedEntry.checklist).filter(Boolean).length;
+                    const savedChecklist = {
+                      ...savedEntry.checklist,
+                      hookShot: true,
+                      angleShots: true,
+                      shotsCaptured: true,
+                      productionGoal: true,
+                      scriptUsed: savedEntry.customScript.trim().length > 0,
+                      captionUsed: savedEntry.customCaption.trim().length > 0,
+                    };
+                    const doneCount = Object.values(savedChecklist).filter(Boolean).length;
                     const isSelected = key === dateKey;
                     const isToday = key === formatDateKey(today);
 
@@ -798,16 +839,13 @@ export default function App() {
                           setSelectedDate(day);
                           setView("today");
                         }}
-                        style={{
-                          ...styles.dayCell,
-                          ...(isSelected ? styles.daySelected : {}),
-                        }}
+                        style={{ ...styles.dayCell, ...(isSelected ? styles.daySelected : {}) }}
                       >
                         <div style={styles.dayTop}>
                           <span>{day.getDate()}</span>
                           {isToday ? <span style={isSelected ? styles.dotLight : styles.dotDark} /> : null}
                         </div>
-                        <small style={isSelected ? styles.daySmallSelected : styles.daySmall}>{doneCount}/9</small>
+                        <small style={isSelected ? styles.daySmallSelected : styles.daySmall}>{doneCount}/8</small>
                       </button>
                     );
                   })}
@@ -821,32 +859,27 @@ export default function App() {
               <div style={styles.viewHeader}>
                 <div>
                   <div style={styles.smallEyebrow}>Production Tracker</div>
-                  <h2 style={styles.viewTitle}>Daily Checklist</h2>
+                  <h2 style={styles.viewTitle}>Linked Checklist</h2>
                 </div>
                 <div style={styles.badge}>{plan.pillar}</div>
               </div>
+              <div style={styles.feedbackCard}>
+                {completion >= 100 ? "Everything for today is ready." : completion >= 75 ? "Strong progress. Finish editing or posting." : completion >= 50 ? "You have the base content. Add script/caption details next." : "Start with the hook, angles, and today’s shot list."}
+              </div>
               <div style={styles.checklistGridMobile}>
-                {[
-                  ["droneShot", "Drone shot"],
-                  ["phoneShot", "Phone shot"],
-                  ["talkingClip", "Talking clip"],
-                  ["detailShots", "Detail shots"],
-                  ["beforeAfterAngle", "Before/after angle"],
-                  ["scriptUsed", "Script used"],
-                  ["captionReady", "Caption ready"],
-                  ["edited", "Edited"],
-                  ["posted", "Posted"],
-                ].map(([key, label]) => (
+                {checklistItems.map(([key, label, locked]) => (
                   <button
                     key={key}
                     onClick={() => toggleChecklist(key)}
                     style={{
                       ...styles.checkTile,
-                      ...(entry.checklist[key] ? styles.checkTileDone : {}),
+                      ...(liveChecklist[key] ? styles.checkTileDone : {}),
+                      ...(locked ? styles.checkTileLocked : {}),
                     }}
                   >
                     <span>{label}</span>
-                    <strong>{entry.checklist[key] ? "Done" : "Open"}</strong>
+                    <strong>{liveChecklist[key] ? "Done" : locked ? "Auto" : "Open"}</strong>
+                    {locked ? <small style={styles.lockedNote}>Linked to today’s plan</small> : null}
                   </button>
                 ))}
               </div>
@@ -862,9 +895,7 @@ export default function App() {
                 </div>
                 <div style={styles.miniPill}>{filteredBank.length} ideas</div>
               </div>
-              <SlideNav index={librarySlide} setIndex={setLibrarySlide} count={librarySlides.length} />
-              <SlideDots count={librarySlides.length} index={librarySlide} setIndex={setLibrarySlide} />
-              <div style={styles.slideViewport}>{librarySlides[librarySlide].content}</div>
+              <SwipeDeck slides={librarySlides} index={librarySlide} setIndex={setLibrarySlide} />
             </div>
           )}
 
@@ -908,14 +939,7 @@ export default function App() {
             ["library", "Library"],
             ["notes", "Notes"],
           ].map(([key, label]) => (
-            <button
-              key={key}
-              onClick={() => setView(key)}
-              style={{
-                ...styles.navTab,
-                ...(view === key ? styles.navTabActive : {}),
-              }}
-            >
+            <button key={key} onClick={() => setView(key)} style={{ ...styles.navTab, ...(view === key ? styles.navTabActive : {}) }}>
               {label}
             </button>
           ))}
@@ -987,10 +1011,7 @@ const styles = {
     padding: "10px 14px",
     fontWeight: 700,
   },
-  contentArea: {
-    flex: 1,
-    display: "flex",
-  },
+  contentArea: { flex: 1, display: "flex" },
   fixedView: {
     width: "100%",
     background: colors.white,
@@ -1030,21 +1051,6 @@ const styles = {
     borderRadius: 999,
     fontWeight: 700,
   },
-  slideNav: {
-    display: "flex",
-    justifyContent: "flex-end",
-    gap: 8,
-  },
-  slideArrow: {
-    width: 42,
-    height: 42,
-    borderRadius: 14,
-    border: `1px solid ${colors.border}`,
-    background: colors.cream,
-    cursor: "pointer",
-    fontWeight: 700,
-    color: colors.navy,
-  },
   dotsWrap: {
     display: "flex",
     justifyContent: "center",
@@ -1061,6 +1067,12 @@ const styles = {
   dotBtnActive: {
     width: 28,
     background: colors.sky,
+  },
+  swipeHint: {
+    textAlign: "center",
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: 600,
   },
   slideViewport: {
     flex: 1,
@@ -1222,9 +1234,7 @@ const styles = {
     gridTemplateColumns: "repeat(7, 1fr)",
     gap: 8,
   },
-  blankDay: {
-    minHeight: 70,
-  },
+  blankDay: { minHeight: 70 },
   dayCell: {
     minHeight: 78,
     borderRadius: 18,
@@ -1247,12 +1257,8 @@ const styles = {
     justifyContent: "space-between",
     alignItems: "center",
   },
-  daySmall: {
-    color: colors.muted,
-  },
-  daySmallSelected: {
-    color: "rgba(255,255,255,0.72)",
-  },
+  daySmall: { color: colors.muted },
+  daySmallSelected: { color: "rgba(255,255,255,0.72)" },
   dotDark: {
     width: 8,
     height: 8,
@@ -1284,6 +1290,20 @@ const styles = {
     background: `linear-gradient(135deg, ${colors.navy} 0%, ${colors.sky} 100%)`,
     color: colors.white,
     borderColor: colors.navy,
+  },
+  checkTileLocked: {
+    boxShadow: `inset 0 0 0 1px rgba(47,110,165,0.08)`,
+  },
+  lockedNote: {
+    opacity: 0.8,
+    fontSize: 11,
+  },
+  feedbackCard: {
+    background: colors.sand,
+    color: colors.navyDeep,
+    borderRadius: 20,
+    padding: 14,
+    fontWeight: 700,
   },
   select: {
     padding: 14,
